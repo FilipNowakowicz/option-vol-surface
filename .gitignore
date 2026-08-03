@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
+
+# The option-chain snapshot and its metadata are committed for reproducibility.
+# Historical price series are refreshable runtime caches.
+cache/*_hist.parquet
+
