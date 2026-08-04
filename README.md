@@ -119,11 +119,13 @@ crush-resistant vega, was sufficient.
 ## How to run
 
 ```bash
-nix develop --command python run.py        # full pipeline + all plots
-nix develop --command pytest tests/ -q     # 131 tests
+uv sync
+uv run python run.py        # full pipeline + all plots
+uv run pytest tests/ -q     # 131 tests
 ```
 
-Outside NixOS, `pip install -r requirements.txt` then `python run.py`.
+`uv` installs the Python version and exact dependencies recorded in `uv.lock`
+on Linux, macOS, and Windows.
 
 The first call to `fetch_chain('SPY')` hits yfinance; subsequent runs read
 from `cache/SPY_chain.parquet` until it ages past one day.

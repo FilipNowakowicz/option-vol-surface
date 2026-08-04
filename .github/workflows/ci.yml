@@ -14,16 +14,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
+          version: "0.11.28"
+          enable-cache: true
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt ruff
+      - name: Install locked dependencies
+        run: uv sync --locked
 
       - name: Lint
-        run: ruff check --select F .
+        run: uv run --locked ruff check --select F .
 
       - name: Run tests
-        run: pytest tests/ -q
+        run: uv run --locked pytest tests/ -q
