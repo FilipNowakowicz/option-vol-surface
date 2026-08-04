@@ -67,6 +67,8 @@ def run_straddle(
     spy = spy.dropna()
     vix = vix.dropna()
     spy, vix = spy.align(vix, join="inner")
+    if len(spy) < 2:
+        raise ValueError("SPY and VIX need at least two overlapping observations")
     if entry_date not in spy.index:
         # snap to next available trading day
         candidates = spy.index[spy.index >= entry_date]
@@ -76,7 +78,9 @@ def run_straddle(
 
     idx = spy.index
     entry_pos = idx.get_loc(entry_date)
-    last_pos = min(entry_pos + holding_days, len(idx) - 1)
+    last_pos = entry_pos + holding_days
+    if last_pos >= len(idx):
+        raise ValueError("insufficient observations for the requested holding period")
 
     S0 = float(spy.iloc[entry_pos])
     K = S0

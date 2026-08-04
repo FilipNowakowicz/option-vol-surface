@@ -1,11 +1,12 @@
 """End-to-end: BS pricer sanity, MC convergence, IV surface, straddle attribution.
 
-Runs the whole project; prints headline numbers and saves all plots
-(.png at top level). Cached chain / history under cache/.
+Prints headline numbers and saves generated plots below ignored ``outputs/``.
+The committed chain snapshot remains untouched; live data requires ``--refresh``.
 """
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -31,7 +32,7 @@ def header(s: str):
     print("=" * 70)
 
 
-def mc_convergence(S=100, K=100, T=1.0, r=0.03, sigma=0.20, q=0.0):
+def mc_convergence(path: Path, S=100, K=100, T=1.0, r=0.03, sigma=0.20, q=0.0):
     """Plot MC ± 2 stderr vs path count, converging to analytical."""
     analytic = bs.price(S, K, T, r, sigma, q, "call")
     grid = [1_000, 4_000, 16_000, 64_000, 256_000, 1_000_000]
@@ -53,7 +54,7 @@ def mc_convergence(S=100, K=100, T=1.0, r=0.03, sigma=0.20, q=0.0):
     ax.legend()
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    fig.savefig(HERE / "mc_convergence.png", dpi=120)
+    fig.savefig(path, dpi=120)
     plt.close(fig)
     return df, analytic
 
@@ -148,7 +149,9 @@ def plot_attribution(attribution: pd.DataFrame, path: Path):
     plt.close(fig)
 
 
-def main():
+def main(refresh: bool = False):
+    output_dir = HERE / "outputs" / ("live" if refresh else "frozen")
+    output_dir.mkdir(parents=True, exist_ok=True)
     header("Phase 1 — Black-Scholes Greek sanity")
     S, K, T, r, sigma, q = 100, 100, 1.0, 0.03, 0.20, 0.0
     g = bs.all_greeks(S, K, T, r, sigma, q, "call")
@@ -161,13 +164,13 @@ def main():
     print(f"  put-call parity error: {parity_err:.2e}")
 
     header("Phase 2 — Monte Carlo convergence vs BS")
-    df_mc, analytic = mc_convergence()
+    df_mc, analytic = mc_convergence(output_dir / "mc_convergence.png")
     print(df_mc.to_string(index=False, float_format=lambda x: f"{x:.5f}"))
     print(f"  BS analytical: {analytic:.5f}")
     print("  → mc_convergence.png saved")
 
     header("Phase 3 + 4 — Real SPY surface")
-    data = fetch_chain(TICKER)
+    data = fetch_chain(TICKER, refresh=refresh)
     spot, q_yfin, asof, chain = data["spot"], data["q"], data["asof"], data["chain"]
     cleaned = clean_chain(chain)
     print(f"  asof          {asof.date()}")
@@ -187,15 +190,15 @@ def main():
     print("Skew (dIV/dk near ATM):")
     print(diag.skew.head(10).to_string(index=False, float_format=lambda x: f"{x:.4f}"))
 
-    plot_surface_3d(surf, HERE / "surface_3d.png")
-    plot_smile_slices(surf, HERE / "smile_slices.png")
-    plot_term_structure(diag.term_structure, HERE / "term_structure.png")
-    plot_skew(diag.skew, HERE / "skew.png")
+    plot_surface_3d(surf, output_dir / "surface_3d.png")
+    plot_smile_slices(surf, output_dir / "smile_slices.png")
+    plot_term_structure(diag.term_structure, output_dir / "term_structure.png")
+    plot_skew(diag.skew, output_dir / "skew.png")
     print("  → surface_3d.png, smile_slices.png, term_structure.png, skew.png saved")
 
     header("Phase 5 — ATM straddle P&L decomposition")
-    spy_hist = fetch_history(TICKER, start="2026-01-01")
-    vix_hist = fetch_history("^VIX", start="2026-01-01")
+    spy_hist = fetch_history(TICKER, start="2026-01-01", refresh=refresh)
+    vix_hist = fetch_history("^VIX", start="2026-01-01", refresh=refresh)
     # Open 21 trading days before the last available bar so we have a clean
     # holding window with realised data on every day.
     entry = spy_hist.index[-(HOLD_DAYS + 1)]
@@ -218,11 +221,17 @@ def main():
     print(f"  theta P&L     ${res.totals['theta_pnl']:+.4f}")
     print(f"  residual      ${res.totals['residual']:+.4f}"
           f"   ({100 * res.totals['residual_pct_of_gross']:.2f}% of gross |Σ Greeks|)")
-    plot_attribution(res.attribution, HERE / "attribution.png")
+    plot_attribution(res.attribution, output_dir / "attribution.png")
     print("  → attribution.png saved")
 
     header("Done.")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="download live inputs into ignored runtime caches; never overwrites the committed chain snapshot",
+    )
+    main(refresh=parser.parse_args().refresh)

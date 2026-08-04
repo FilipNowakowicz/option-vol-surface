@@ -1,15 +1,14 @@
-"""SPY option chain fetch + caching.
+"""SPY option-chain data and explicitly refreshed runtime caches.
 
-yfinance gives us the full chain at all listed expiries for the current
-snapshot. We cache the resulting frame as Parquet so analysis is reproducible
-even after the live chain changes.
-
-For a research-project snapshot, a single trade-date capture is enough.
+The committed option-chain files are a frozen research artefact.  Normal
+runs always read them, so the figures and numbers in the repository cannot be
+silently changed by a live yfinance response.  A live chain is available only
+through ``refresh=True`` and is written under ``cache/live/`` rather than over
+the committed snapshot.
 """
 
 from __future__ import annotations
 
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -18,7 +17,6 @@ import pandas as pd
 import yfinance as yf
 
 CACHE_DIR = Path(__file__).resolve().parent.parent / "cache"
-CACHE_MAX_AGE_S = 24 * 3600  # one day
 
 
 def _spot_and_yield(ticker: str) -> tuple[float, float]:
@@ -35,8 +33,28 @@ def _spot_and_yield(ticker: str) -> tuple[float, float]:
     return spot, float(q)
 
 
-def fetch_chain(ticker: str = "SPY", force: bool = False) -> dict:
-    """Return {spot, q, asof, chain DataFrame} for the current snapshot.
+def _read_chain(cache_path: Path, meta_path: Path) -> dict:
+    """Read one option-chain snapshot and its metadata."""
+    if not cache_path.exists() or not meta_path.exists():
+        raise FileNotFoundError(
+            f"missing option-chain snapshot: {cache_path} and {meta_path} are required"
+        )
+    meta = pd.read_parquet(meta_path).iloc[0]
+    return dict(
+        spot=float(meta["spot"]),
+        q=float(meta["q"]),
+        asof=pd.Timestamp(meta["asof"]),
+        chain=pd.read_parquet(cache_path),
+    )
+
+
+def fetch_chain(ticker: str = "SPY", *, refresh: bool = False) -> dict:
+    """Return the frozen chain snapshot, or explicitly fetch a new live one.
+
+    ``refresh=False`` (the default) reads the committed snapshot at
+    ``cache/<ticker>_chain.parquet``.  ``refresh=True`` calls yfinance and
+    writes a date-stamped, ignored capture below ``cache/live/``.  It never
+    overwrites the committed research evidence.
 
     DataFrame columns:
         type            'call' | 'put'
@@ -49,20 +67,8 @@ def fetch_chain(ticker: str = "SPY", force: bool = False) -> dict:
     CACHE_DIR.mkdir(exist_ok=True)
     cache_path = CACHE_DIR / f"{ticker}_chain.parquet"
     meta_path = CACHE_DIR / f"{ticker}_chain_meta.parquet"
-
-    fresh = (
-        cache_path.exists()
-        and (time.time() - cache_path.stat().st_mtime) < CACHE_MAX_AGE_S
-    )
-    if fresh and not force:
-        df = pd.read_parquet(cache_path)
-        meta = pd.read_parquet(meta_path).iloc[0]
-        return dict(
-            spot=float(meta["spot"]),
-            q=float(meta["q"]),
-            asof=pd.Timestamp(meta["asof"]),
-            chain=df,
-        )
+    if not refresh:
+        return _read_chain(cache_path, meta_path)
 
     spot, q = _spot_and_yield(ticker)
     asof = pd.Timestamp(datetime.utcnow().date())
@@ -101,19 +107,29 @@ def fetch_chain(ticker: str = "SPY", force: bool = False) -> dict:
         }
     )
 
-    out.to_parquet(cache_path)
-    pd.DataFrame([{"spot": spot, "q": q, "asof": asof}]).to_parquet(meta_path)
+    live_dir = CACHE_DIR / "live"
+    live_dir.mkdir(exist_ok=True)
+    stamp = datetime.utcnow().strftime("%Y-%m-%dT%H%M%SZ")
+    live_chain_path = live_dir / f"{ticker}_chain_{stamp}.parquet"
+    live_meta_path = live_dir / f"{ticker}_chain_meta_{stamp}.parquet"
+    out.to_parquet(live_chain_path)
+    pd.DataFrame([{"spot": spot, "q": q, "asof": asof}]).to_parquet(live_meta_path)
 
     return dict(spot=spot, q=q, asof=asof, chain=out)
 
 
-def fetch_history(ticker: str, start: str = "2025-01-01") -> pd.Series:
-    """Daily close series, cached as Parquet."""
+def fetch_history(ticker: str, start: str = "2025-01-01", *, refresh: bool = False) -> pd.Series:
+    """Read a local daily-close cache, refreshing it only when requested."""
     CACHE_DIR.mkdir(exist_ok=True)
     safe = ticker.replace("^", "_").replace("=", "_").replace("/", "_")
     path = CACHE_DIR / f"{safe}_hist.parquet"
-    if path.exists() and (time.time() - path.stat().st_mtime) < CACHE_MAX_AGE_S:
+    if path.exists() and not refresh:
         return pd.read_parquet(path)[safe]
+
+    if not refresh:
+        raise FileNotFoundError(
+            f"no local history cache for {ticker}; rerun with refresh=True to download it"
+        )
 
     data = yf.download(ticker, start=start, auto_adjust=False, progress=False)
     close = data["Close"]
@@ -141,6 +157,12 @@ def clean_chain(
       * 5d <= T <= 2y              — too-near and too-far expiries are noisy
     """
     d = df.copy()
+    required = {"bid", "ask", "mid", "open_interest", "T"}
+    missing = required.difference(d.columns)
+    if missing:
+        raise ValueError(f"chain is missing required columns: {sorted(missing)}")
+    numeric = list(required)
+    d = d.replace([np.inf, -np.inf], np.nan).dropna(subset=numeric)
     d = d[d["bid"] > min_bid]
     d = d[d["ask"] > d["bid"]]
     rel_spread = (d["ask"] - d["bid"]) / d["mid"].clip(lower=1e-6)

@@ -9,15 +9,16 @@ notation so you can jump in directly.
 ## 1. What the system does, in one sentence
 
 Implement Black-Scholes from scratch with every Greek, cross-check with
-Monte Carlo, invert option prices into implied volatilities, fit a smile
-surface to real SPY listed options, and use the surface to attribute the
-realised P&L of a long ATM straddle into delta/gamma/vega/theta
-contributions.
+Monte Carlo, invert option prices into implied volatilities, construct a
+surface from a frozen SPY listed-options snapshot, and use an illustrative ATM
+straddle re-mark to attribute model P&L into delta/gamma/vega/theta
+contributions. It is an educational implementation, not a trading strategy.
 
 Output: six plots (`mc_convergence.png`, `surface_3d.png`,
 `smile_slices.png`, `term_structure.png`, `skew.png`, `attribution.png`),
-a printed summary of headline numbers, and **131 pytest tests** that
-verify correctness of every analytical Greek and the IV round-trip.
+a printed summary of headline numbers, and **136 pytest tests** that cover
+the pricing/IV layer, quote cleaning, surface diagnostics, and attribution
+accounting.
 
 ---
 
@@ -42,7 +43,7 @@ verify correctness of every analytical Greek and the IV round-trip.
                               │
                               ▼
               ┌──── Phase 4 — empirics ────┐
-              │  data.fetch_chain (SPY)    │  yfinance chain (cached)
+              │  data.fetch_chain (SPY)    │  frozen chain by default
               │     │ data.clean_chain     │  quote-quality filter
               │     ▼                      │
               │  surface.build_surface     │  (K, T, mid) → σ̂
@@ -179,13 +180,14 @@ complication.
 
 Three things this module does:
 
-- `fetch_chain(ticker)` (`data.py:38`) pulls the full option chain at
-  every listed expiry on the current trade date, with caching. Spot and
-  dividend yield come from `_spot_and_yield` (`data.py:24`), which
-  handles yfinance's inconsistent yield reporting (sometimes pct,
-  sometimes decimal).
-- `fetch_history(ticker, start)` (`data.py:110`) is the daily-close
-  fetcher used for SPY and ^VIX time series in the strategy.
+- `fetch_chain(ticker)` (`data.py`) reads the committed chain snapshot by
+  default. `fetch_chain(refresh=True)` is the explicit opt-in live-data path;
+  it writes a date-stamped comparison capture in ignored `cache/live/` and
+  never overwrites the committed evidence. Spot and dividend yield come from
+  `_spot_and_yield`, which handles yfinance's inconsistent yield reporting.
+- `fetch_history(ticker, start)` reads a local daily-close cache used for the
+  attribution. `refresh=True` is required to download it; ordinary runs do
+  not silently change inputs.
 - `clean_chain` (`data.py:128`) is the **quote-quality filter** —
   `bid > $0.05`, `(ask − bid) / mid ≤ 25%`, `OI ≥ 10`,
   `5d ≤ T ≤ 2y`. These thresholds drop about a third of raw quotes
@@ -193,8 +195,8 @@ Three things this module does:
   the surface; a tighter one would discard real OTM strikes.
 
 The cache files in `cache/` are gitignored for the historical series but
-**committed for the chain snapshot** so the project remains reproducible
-at exactly its quoted date.
+**committed for the chain snapshot** so the surface remains reproducible at
+exactly its quoted date. Live comparison captures are also ignored.
 
 ### `src/surface.py` — empirical IV surface diagnostics
 
@@ -217,9 +219,8 @@ with five frames:
 - `butterfly` — for each expiry, find the call closest to +25Δ and the
   put closest to −25Δ, then compute `σ_25C + σ_25P − 2·σ_ATM`. This is
   a model-free measure of smile curvature.
-- `arb_violations` — within each expiry, call mid should be monotone
-  decreasing in K. Any violation is reported (`surface.py:155`) and
-  **not** silently smoothed.
+- `arb_violations` — European price bounds plus monotonicity in strike for
+  calls and puts. Any violation is reported and **not** silently smoothed.
 
 **Why no SVI / no parametric fit?** Two reasons. First, the project is
 about *the empirical surface itself*, not about fitting a particular
@@ -273,6 +274,11 @@ Top-down:
 The orchestrator is **deliberately printable** — every section ends in
 a one-line summary so you can read the full output of one run and
 understand the state of the project at that snapshot date.
+
+By default, it writes a reproduction from frozen/local inputs under ignored
+`outputs/frozen/`. With `uv run python run.py --refresh`, yfinance is
+explicitly contacted and comparison figures go to ignored `outputs/live/`.
+Neither mode replaces the tracked reference figures.
 
 ---
 
