@@ -16,7 +16,8 @@ contributions. It is an educational implementation, not a trading strategy.
 
 Output: six plots (`mc_convergence.png`, `surface_3d.png`,
 `smile_slices.png`, `term_structure.png`, `skew.png`, `attribution.png`),
-a printed summary of headline numbers, and **136 pytest tests** that cover
+a per-expiry SVI-validation CSV, a printed summary of headline numbers, and
+**139 pytest tests** that cover
 the pricing/IV layer, quote cleaning, surface diagnostics, and attribution
 accounting.
 
@@ -51,6 +52,14 @@ accounting.
               │     ▼                      │
               │  3D plot + 2D slices       │
               └────────────────────────────┘
+                              │
+                              ▼
+              ┌──── Phase 4b — parametric validation ─┐
+              │  svi.calibrate_surface                 │  raw SVI per expiry
+              │     │ deterministic strike holdout      │  interpolation test
+              │     ▼                                  │
+              │  IV/price error + grid diagnostics     │  not arb-free claim
+              └────────────────────────────────────────┘
                               │
                               ▼
               ┌──── Phase 5 — strategy ────┐
@@ -222,11 +231,25 @@ with five frames:
 - `arb_violations` — European price bounds plus monotonicity in strike for
   calls and puts. Any violation is reported and **not** silently smoothed.
 
-**Why no SVI / no parametric fit?** Two reasons. First, the project is
-about *the empirical surface itself*, not about fitting a particular
-parametric form. Second, SVI fits are interview-grade only when you can
-articulate the no-arbitrage constraints they impose; without that, it's
-window-dressing.
+### `src/svi.py` — constrained raw-SVI interpolation check
+
+`calibrate_surface` fits the raw SVI total-variance form independently per
+expiry. It first builds a canonical OTM slice (put below forward, call at or
+above forward), retains one quote per strike, then withholds every fifth
+interior strike. That makes the train/holdout division deterministic and
+prevents an interpolation benchmark from extrapolating beyond its training
+domain.
+
+The optimiser uses two deterministic starts and bounds `b > 0`,
+`|rho| < 1`, `sigma > 0`. Rather than freely fitting `a`, it fits the minimum
+total variance and derives `a`; this guarantees `w(k) > 0` for all k. The
+CSV records train and holdout IV RMSE, holdout price RMSE (puts converted to
+calls by put-call parity), and a piecewise-linear total-variance benchmark.
+
+This is deliberately not called an arbitrage-free SVI surface. Price
+convexity is sampled on a dense strike grid, and total variance is compared
+on a common-k grid across adjacent expiries; neither diagnostic is imposed as
+a calibration constraint or proves global static-arbitrage freedom.
 
 ### `src/strategy.py` — ATM straddle daily attribution
 
@@ -266,7 +289,8 @@ Top-down:
    1e-10 (`run.py:main`).
 2. Run `mc.price_european` at a path-count grid `[1k, 4k, 16k, 64k,
    256k, 1M]`, plot price ± 2·stderr.
-3. Pull SPY chain → clean → build surface → diagnose → plot four
+3. Pull SPY chain → clean → build surface → diagnose → fit and validate
+   independent SVI slices → plot four
    surface charts (3D, smile slices, term structure, skew).
 4. Pull SPY + VIX history → simulate ATM straddle 21 days from the
    most-recent-minus-21 entry date → print the attribution → plot it.
