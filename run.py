@@ -17,6 +17,7 @@ from src import bs, mc
 from src.data import clean_chain, fetch_chain, fetch_history
 from src.strategy import run_straddle
 from src.surface import build_surface, diagnose
+from src.svi import calibrate_surface, surface_arbitrage_diagnostics
 
 HERE = Path(__file__).resolve().parent
 TICKER = "SPY"
@@ -190,6 +191,18 @@ def main(refresh: bool = False):
     print("Skew (dIV/dk near ATM):")
     print(diag.skew.head(10).to_string(index=False, float_format=lambda x: f"{x:.4f}"))
 
+    header("Phase 4b — SVI interpolation validation")
+    svi = calibrate_surface(surf, spot=spot, r=R, q=q_yfin)
+    svi.to_csv(output_dir / "svi_validation.csv", index=False)
+    svi_diag = surface_arbitrage_diagnostics(svi)
+    print(f"  calibrated expiries {len(svi)}")
+    print(f"  held-out IV RMSE   {svi['holdout_iv_rmse'].mean():.4%} (equal-weighted slices)")
+    print(f"  linear IV RMSE     {svi['linear_holdout_iv_rmse'].mean():.4%} (same split)")
+    print(f"  held-out price RMSE ${svi['holdout_price_rmse'].mean():.4f}")
+    print(f"  grid butterfly flags {svi_diag['butterfly_grid_violations']}")
+    print(f"  grid calendar flags  {svi_diag['calendar_grid_violations']}")
+    print("  → svi_validation.csv saved (diagnostic flags are not constraints)")
+
     plot_surface_3d(surf, output_dir / "surface_3d.png")
     plot_smile_slices(surf, output_dir / "smile_slices.png")
     plot_term_structure(diag.term_structure, output_dir / "term_structure.png")
@@ -197,8 +210,17 @@ def main(refresh: bool = False):
     print("  → surface_3d.png, smile_slices.png, term_structure.png, skew.png saved")
 
     header("Phase 5 — ATM straddle P&L decomposition")
-    spy_hist = fetch_history(TICKER, start="2026-01-01", refresh=refresh)
-    vix_hist = fetch_history("^VIX", start="2026-01-01", refresh=refresh)
+    try:
+        spy_hist = fetch_history(TICKER, start="2026-01-01", refresh=refresh)
+        vix_hist = fetch_history("^VIX", start="2026-01-01", refresh=refresh)
+    except FileNotFoundError:
+        # History is deliberately an ignored local cache: it is not part of
+        # the immutable option-chain evidence. Keep the reproducible surface
+        # workflow successful rather than making an old illustrative chart a
+        # hidden network requirement.
+        print("  skipped: local SPY/VIX history is absent; rerun with --refresh for the illustrative attribution")
+        header("Done.")
+        return
     # Open 21 trading days before the last available bar so we have a clean
     # holding window with realised data on every day.
     entry = spy_hist.index[-(HOLD_DAYS + 1)]

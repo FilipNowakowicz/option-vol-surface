@@ -7,7 +7,7 @@ gamma, vega, and theta contributions. Built as an educational derivatives
 engineering study: every Greek is closed-form and finite-difference verified,
 with no black-box pricing library calls.
 
-136 pytest tests cover pricing, IV inversion, quote cleaning, surface
+139 pytest tests cover pricing, IV inversion, quote cleaning, surface
 diagnostics, and P&L-attribution accounting.
 
 For the **implementation walkthrough** (data flow, module-by-module, design
@@ -24,6 +24,7 @@ decisions, code refs), see [`WALKTHROUGH.md`](WALKTHROUGH.md).
 | `src/iv.py`      | Implied vol via Newton-Raphson on vega, with Brent fallback and no-arb filter      |
 | `src/data.py`    | yfinance SPY chain + cached history, quote-quality cleaning                        |
 | `src/surface.py` | Build IV surface, term structure, skew, butterfly, arbitrage-violation check       |
+| `src/svi.py`     | Per-expiry constrained raw-SVI fit, deterministic holdout validation, grid checks   |
 | `src/strategy.py`| ATM straddle daily re-mark + delta/gamma/vega/theta attribution                    |
 | `run.py`         | Reproduces the study from frozen/local inputs; explicit `--refresh` for live data  |
 | `tests/`         | Greeks vs finite-difference, MC convergence to BS, IV round-trip, edge cases       |
@@ -89,6 +90,34 @@ the 0.5–2.5 vol-points range, consistent with a tail-fat distribution.
 ![term structure](term_structure.png)
 ![skew](skew.png)
 
+### Phase 4b — SVI calibration and honest interpolation validation
+
+Each expiry is fitted independently with the five-parameter raw-SVI total
+variance form. The canonical dataset keeps one OTM quote per strike (put below
+forward, call at/above forward). Every fifth *interior* strike is a deterministic
+holdout, leaving the endpoints in training. This is a within-snapshot
+interpolation check, not a forecast or trading backtest.
+
+On the frozen SPY snapshot, all **27** usable expiries fit successfully. The
+equal-weighted mean held-out IV RMSE is **0.265 vol points** and held-out
+price RMSE is **$0.377**. A piecewise-linear total-variance interpolation on
+the exact same split achieves **0.122 vol points** IV RMSE, so this small,
+unweighted SVI specification does **not** beat that local interpolation
+baseline on this snapshot. That comparison is intentionally reported rather
+than selecting a parameterisation because it looks better.
+
+The fit parameterisation enforces positive total variance. It does **not**
+enforce the full SVI butterfly conditions or cross-expiry calendar consistency.
+A dense observed-domain price-convexity scan has 0 butterfly flags, while a
+common-k grid finds **366** adjacent-expiry calendar flags. These are
+diagnostics of independently fitted slices, not a claim that the surface is
+arbitrage-free. Reproduce the exact per-expiry metrics with:
+
+```bash
+uv run python run.py
+# outputs/frozen/svi_validation.csv
+```
+
 ### Phase 5 — ATM straddle P&L attribution
 
 Long ATM straddle opened **2026-04-21** at SPY = 704.08, σ_entry = VIX/100 =
@@ -122,7 +151,7 @@ crush-resistant vega, was sufficient.
 ```bash
 uv sync
 uv run python run.py        # uses frozen/local inputs; writes ignored outputs/frozen/
-uv run pytest tests/ -q     # 136 tests
+uv run pytest tests/ -q     # 139 tests
 ```
 
 `uv` installs the Python version and exact dependencies recorded in `uv.lock`
@@ -140,6 +169,9 @@ This writes a date-stamped option-chain capture under ignored `cache/live/`,
 refreshes the ignored local SPY/VIX history cache, and saves comparison figures
 under `outputs/live/`; normal runs use `outputs/frozen/`. Neither mode
 overwrites the committed snapshot or figures.
+The surface and SVI workflow completes from the committed snapshot alone. The
+illustrative straddle phase is skipped when its intentionally untracked
+SPY/VIX history cache is absent; use `--refresh` to fetch that optional input.
 The straddle section is an **illustrative Greek
 attribution**, not a tradable strategy or backtest. It uses daily closes and
 VIX as a 30-day IV proxy, does not model executable option quotes, and should
@@ -162,6 +194,10 @@ not be interpreted as evidence of alpha or expected returns.
   but rarely exercised early; treated as European throughout.
 - **Continuous dividend yield**: trailing yfinance yield used as `q`; no
   discrete-dividend forecasting.
+- **SVI is slice-by-slice**: positive total variance is enforced, but no
+  butterfly-arbitrage or calendar-arbitrage constraint is imposed. Its
+  holdout is interpolation inside one frozen chain, not evidence of future
+  surface prediction.
 
 These are the right places to be honest about — at interview, "where would
 this model break?" is a guaranteed question.
