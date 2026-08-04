@@ -1,13 +1,14 @@
 # options-vol-surface — Options Pricer, Implied Vol & Greek Attribution
 
 A from-scratch Black-Scholes engine, Monte Carlo cross-check, implied-volatility
-extraction with no-arbitrage filtering, an empirical vol surface from listed
-SPY options, and an ATM-straddle P&L decomposed into delta, gamma, vega, theta
-contributions. Built to demonstrate derivatives fluency at the level QR/QT
-interviews probe — every Greek closed-form and finite-difference verified,
-no black-box library calls.
+extraction with no-arbitrage filtering, an empirical vol surface from a frozen
+SPY option-chain snapshot, and an ATM-straddle P&L decomposed into delta,
+gamma, vega, and theta contributions. Built as an educational derivatives
+engineering study: every Greek is closed-form and finite-difference verified,
+with no black-box pricing library calls.
 
-131 pytest tests, all passing.
+136 pytest tests cover pricing, IV inversion, quote cleaning, surface
+diagnostics, and P&L-attribution accounting.
 
 For the **implementation walkthrough** (data flow, module-by-module, design
 decisions, code refs), see [`WALKTHROUGH.md`](WALKTHROUGH.md).
@@ -24,7 +25,7 @@ decisions, code refs), see [`WALKTHROUGH.md`](WALKTHROUGH.md).
 | `src/data.py`    | yfinance SPY chain + cached history, quote-quality cleaning                        |
 | `src/surface.py` | Build IV surface, term structure, skew, butterfly, arbitrage-violation check       |
 | `src/strategy.py`| ATM straddle daily re-mark + delta/gamma/vega/theta attribution                    |
-| `run.py`         | End-to-end orchestrator: prints headline numbers, writes all six plots             |
+| `run.py`         | Reproduces the study from frozen/local inputs; explicit `--refresh` for live data  |
 | `tests/`         | Greeks vs finite-difference, MC convergence to BS, IV round-trip, edge cases       |
 
 ---
@@ -64,7 +65,7 @@ fallback when Newton's vega vanishes.
 - Raw chain: **9,847** quotes over 32 expiries
 - After quality filter (bid > $0.05, rel-spread ≤ 25%, OI ≥ 10, 5d ≤ T ≤ 2y): **6,325**
 - After IV extraction (drops no-arb violations): **6,250** across 27 expiries
-- Arbitrage violations flagged (not smoothed): **8**
+- Arbitrage flags (European bounds or vertical monotonicity; not smoothed): **45**
 
 **Term structure (contango):** ATM IV rises monotonically from **13.0% at 1
 week** to **19.4% at 1.5 years** — normal upward-sloping shape with no
@@ -120,15 +121,29 @@ crush-resistant vega, was sufficient.
 
 ```bash
 uv sync
-uv run python run.py        # full pipeline + all plots
-uv run pytest tests/ -q     # 131 tests
+uv run python run.py        # uses frozen/local inputs; writes ignored outputs/frozen/
+uv run pytest tests/ -q     # 136 tests
 ```
 
 `uv` installs the Python version and exact dependencies recorded in `uv.lock`
 on Linux, macOS, and Windows.
 
-The first call to `fetch_chain('SPY')` hits yfinance; subsequent runs read
-from `cache/SPY_chain.parquet` until it ages past one day.
+The committed `cache/SPY_chain*.parquet` files are immutable evidence for the
+results above. A normal run always reads them and never contacts yfinance for a
+replacement. To compare against live data, run:
+
+```bash
+uv run python run.py --refresh
+```
+
+This writes a date-stamped option-chain capture under ignored `cache/live/`,
+refreshes the ignored local SPY/VIX history cache, and saves comparison figures
+under `outputs/live/`; normal runs use `outputs/frozen/`. Neither mode
+overwrites the committed snapshot or figures.
+The straddle section is an **illustrative Greek
+attribution**, not a tradable strategy or backtest. It uses daily closes and
+VIX as a 30-day IV proxy, does not model executable option quotes, and should
+not be interpreted as evidence of alpha or expected returns.
 
 ---
 
@@ -140,7 +155,7 @@ from `cache/SPY_chain.parquet` until it ages past one day.
 - **Single-date surface snapshot, not a time series**: surface diagnostics
   are valid for one trade date only; rebuilding daily would need a paid data
   source.
-- **Mid-quote pricing only**: no bid/ask spread cost in the strategy backtest.
+- **Mid-quote pricing only**: no bid/ask spread cost in the attribution example.
 - **yfinance staleness**: option chain quote times are not strictly synchronous
   with the spot close.
 - **American-style ignored**: listed SPY options are technically American

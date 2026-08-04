@@ -66,7 +66,7 @@ def _atm_iv_per_expiry(surf: pd.DataFrame) -> pd.DataFrame:
         atm_iv = _interp_at_k0(g)
         if not np.isnan(atm_iv):
             rows.append(dict(T=T, expiry=exp, atm_iv=atm_iv))
-    return pd.DataFrame(rows).sort_values("T").reset_index(drop=True)
+    return pd.DataFrame(rows, columns=["T", "expiry", "atm_iv"]).sort_values("T").reset_index(drop=True)
 
 
 def _interp_at_k0(g: pd.DataFrame) -> float:
@@ -107,7 +107,7 @@ def _skew_per_expiry(surf: pd.DataFrame, band: float = 0.10) -> pd.DataFrame:
         v = otm["iv"].to_numpy()
         slope = np.polyfit(k, v, 1)[0]
         rows.append(dict(T=T, expiry=exp, skew_dIVdk=slope))
-    return pd.DataFrame(rows).sort_values("T").reset_index(drop=True)
+    return pd.DataFrame(rows, columns=["T", "expiry", "skew_dIVdk"]).sort_values("T").reset_index(drop=True)
 
 
 def _butterfly_per_expiry(
@@ -149,25 +149,41 @@ def _butterfly_per_expiry(
                 butterfly=c_row["iv"] + p_row["iv"] - 2 * atm.loc[T],
             )
         )
-    return pd.DataFrame(rows).sort_values("T").reset_index(drop=True)
+    return pd.DataFrame(
+        rows,
+        columns=["T", "expiry", "call25_iv", "put25_iv", "atm_iv", "butterfly"],
+    ).sort_values("T").reset_index(drop=True)
 
 
-def _arbitrage_violations(surf: pd.DataFrame) -> pd.DataFrame:
-    """Within each expiry, call mid should be monotone-decreasing in K.
+def _arbitrage_violations(surf: pd.DataFrame, spot: float, r: float, q: float) -> pd.DataFrame:
+    """Report simple per-quote bounds and vertical-spread violations.
 
-    Flag the first violation per expiry; the surface analysis comments on
-    these rather than silently smoothing.
+    These checks are deliberately diagnostic rather than a repair mechanism:
+    quotes are never smoothed or discarded here.  They cover the European
+    price bounds and monotonicity in strike for calls and puts separately.
     """
     rows = []
-    calls = surf[surf["type"] == "call"]
-    for (T, exp), g in calls.groupby(["T", "expiry"], sort=True):
-        g = g.sort_values("strike")
+    for (T, exp, option), group in surf.groupby(["T", "expiry", "type"], sort=True):
+        g = group.sort_values("strike")
+        discounted_spot = spot * np.exp(-q * T)
+        discounted_strike = g["strike"] * np.exp(-r * T)
+        if option == "call":
+            lower = np.maximum(discounted_spot - discounted_strike, 0.0)
+            upper = np.full(len(g), discounted_spot)
+        else:
+            lower = np.maximum(discounted_strike - discounted_spot, 0.0)
+            upper = discounted_strike.to_numpy()
+        for row, lo, hi in zip(g.itertuples(index=False), lower, upper):
+            if row.mid < lo - 1e-6:
+                rows.append(dict(T=T, expiry=exp, type=option, check="lower_bound", strike=row.strike, mid=row.mid))
+            if row.mid > hi + 1e-6:
+                rows.append(dict(T=T, expiry=exp, type=option, check="upper_bound", strike=row.strike, mid=row.mid))
         diffs = g["mid"].diff()
-        bad = g[diffs > 1e-6]
-        if not bad.empty:
-            r0 = bad.iloc[0]
-            rows.append(dict(T=T, expiry=exp, strike=r0["strike"], mid=r0["mid"]))
-    return pd.DataFrame(rows)
+        # Calls decrease and puts increase as strike rises.
+        bad = g[diffs > 1e-6] if option == "call" else g[diffs < -1e-6]
+        for row in bad.itertuples(index=False):
+            rows.append(dict(T=T, expiry=exp, type=option, check="vertical_monotonicity", strike=row.strike, mid=row.mid))
+    return pd.DataFrame(rows, columns=["T", "expiry", "type", "check", "strike", "mid"])
 
 
 def diagnose(
@@ -181,5 +197,5 @@ def diagnose(
         term_structure=_atm_iv_per_expiry(surf),
         skew=_skew_per_expiry(surf),
         butterfly=_butterfly_per_expiry(surf, spot, r, q),
-        arb_violations=_arbitrage_violations(surf),
+        arb_violations=_arbitrage_violations(surf, spot, r, q),
     )
