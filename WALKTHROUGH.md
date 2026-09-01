@@ -312,9 +312,9 @@ Neither mode replaces the tracked reference figures.
 
 Three reasons:
 
-1. **Interview signal.** "I implemented BS and verified every Greek
-   against finite-difference" reads completely differently from "I called
-   `py_vollib.greeks`."
+1. **Understanding.** Writing each Greek and checking it against
+   finite-difference forces every formula and convention to be explicit,
+   which calling `py_vollib.greeks` does not.
 2. **Subtle sign conventions.** Theta in particular has at least three
    conventions in the wild (per-year vs per-day, w.r.t. `t` vs `T`,
    continuously-compounded vs simple). Writing it forces you to pick one
@@ -334,11 +334,13 @@ guarantees convergence.
 
 ### Why antithetic + control variate, not pure-MC + more paths?
 
-The two combined give ~10× variance reduction, which means equivalent
-precision at 1/10 the path count. The control variate has zero extra
-runtime cost (`S_T` is already computed for the payoff); antithetic
-doubles the path count for free by reusing the random draws. Both are
-standard techniques in any QR interview rotation.
+The implementation always uses antithetic paths. In the three fixed test
+cases, adding the control variate reduces variance by 4.55×–11.09× relative
+to antithetic sampling alone, implying the same precision with roughly
+one-quarter to one-eleventh as many paths in those cases. The control
+variate has negligible extra runtime cost (`S_T` is already computed for
+the payoff), while antithetic sampling reuses each normal draw with its
+negative. Both are standard variance-reduction techniques.
 
 ### Why log-moneyness `k = ln(K/F)` instead of raw `K` or strike-pct?
 

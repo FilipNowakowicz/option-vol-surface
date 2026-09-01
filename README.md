@@ -49,9 +49,10 @@ For the ATM 1y call (BS = 9.4134), MC converges as:
 |   256,000 | 9.4284 ± 0.023    |
 | 1,000,000 | 9.4172 ± 0.012    |
 
-Each interval covers the analytical value. Antithetic + control variate
-gives roughly 4× variance reduction over raw GBM in the test cases — both
-verified in `tests/test_mc.py`.
+Each interval covers the analytical value. The estimator always uses
+antithetic paths; adding the discounted-terminal-spot control variate reduces
+variance by **4.55×–11.09×** relative to antithetic sampling alone across the
+three fixed test cases in `tests/test_mc.py`.
 
 ![mc convergence](mc_convergence.png)
 
@@ -68,9 +69,10 @@ fallback when Newton's vega vanishes.
 - After IV extraction (drops no-arb violations): **6,250** across 27 expiries
 - Arbitrage flags (European bounds or vertical monotonicity; not smoothed): **45**
 
-**Term structure (contango):** ATM IV rises monotonically from **13.0% at 1
-week** to **19.4% at 1.5 years** — normal upward-sloping shape with no
-near-term event premium today.
+**Term structure:** ATM IV rises overall from **13.0% at 6 days** to **18.9%
+at 1.67 years**, reaching **19.4% at 1.58 years**. The 27 raw expiry points
+are not monotone; the description is an overall upward slope rather than an
+arbitrage-free term-structure fit.
 
 **Skew (puts richer than calls):** classic SPY shape — extreme at short
 expiries and flattening with maturity:
@@ -82,8 +84,10 @@ expiries and flattening with maturity:
 | 6 months  | -0.45           |
 | 1.5 years | -0.30           |
 
-**Smile curvature (25-delta butterfly):** positive across all expiries, in
-the 0.5–2.5 vol-points range, consistent with a tail-fat distribution.
+**Smile curvature (25-delta butterfly):** mostly positive, but not uniformly
+so: 4 of 27 raw expiry slices are negative, with a minimum of **−1.36 vol
+points**. This is a noisy, non-parametric quote diagnostic rather than an
+arbitrage-free smile claim.
 
 ![surface 3d](surface_3d.png)
 ![smile slices](smile_slices.png)
@@ -98,7 +102,9 @@ forward, call at/above forward). Every fifth *interior* strike is a deterministi
 holdout, leaving the endpoints in training. This is a within-snapshot
 interpolation check, not a forecast or trading backtest.
 
-On the frozen SPY snapshot, all **27** usable expiries fit successfully. The
+On the frozen SPY snapshot, the pipeline returns fitted parameters and
+holdout diagnostics for all **27** usable expiries; **22 of 27** optimiser
+runs report successful convergence. Across all returned slices, the
 equal-weighted mean held-out IV RMSE is **0.265 vol points** and held-out
 price RMSE is **$0.377**. A piecewise-linear total-variance interpolation on
 the exact same split achieves **0.122 vol points** IV RMSE, so this small,
@@ -199,22 +205,20 @@ not be interpreted as evidence of alpha or expected returns.
   holdout is interpolation inside one frozen chain, not evidence of future
   surface prediction.
 
-These are the right places to be honest about — at interview, "where would
-this model break?" is a guaranteed question.
+These are the places where the model is most likely to break.
 
 ---
 
-## What this demonstrates
+## Notes on the design
 
-- Implementing Black-Scholes and **all** Greeks from scratch and verifying
-  every one against finite-difference is the most direct way to show a QR
-  interviewer that the mathematics is internalised, not memorised.
-- The IV solver's no-arb filter + Brent fallback is the kind of robustness
-  layer a research desk actually cares about — naive Newton blows up on
-  illiquid strikes.
+- Every Greek is implemented in closed form and checked against
+  finite-difference, so each formula and sign convention is verified rather
+  than assumed.
+- The IV solver's no-arb filter + Brent fallback matters in practice:
+  naive Newton diverges on illiquid strikes.
 - The smile/skew/term-structure analysis recovers well-known stylised facts
-  (steep front-month skew, contango term structure, persistent butterfly
-  curvature) without parametric smoothing — the surface is the data.
+  while retaining contrary diagnostics: the frozen snapshot has steep
+  front-month skew and contango, but 4 of 27 raw butterfly measures are
+  negative rather than being silently smoothed away.
 - The straddle attribution is the link between **Greeks as derivatives of
-  V** and **Greeks as a P&L decomposition**, which is the single thing
-  options-trading-house interviews probe most directly.
+  V** and **Greeks as a P&L decomposition**.
