@@ -42,17 +42,27 @@ For the ATM 1y call (BS = 9.4134), MC converges as:
 
 | paths     | MC ± 2 SE         |
 | --------: | :---------------- |
-|     1,000 | 9.0772 ± 0.346    |
-|     4,000 | 9.3804 ± 0.189    |
-|    16,000 | 9.3878 ± 0.095    |
-|    64,000 | 9.4191 ± 0.047    |
-|   256,000 | 9.4284 ± 0.023    |
-| 1,000,000 | 9.4172 ± 0.012    |
+|     1,000 | 9.4044 ± 0.165    |
+|     4,000 | 9.3571 ± 0.091    |
+|    16,000 | 9.3698 ± 0.047    |
+|    64,000 | 9.3969 ± 0.023    |
+|   256,000 | 9.4013 ± 0.012    |
+| 1,000,000 | 9.4111 ± 0.006    |
 
-Each interval covers the analytical value. The estimator always uses
-antithetic paths; adding the discounted-terminal-spot control variate reduces
-variance by **4.55×–11.09×** relative to antithetic sampling alone across the
-three fixed test cases in `tests/test_mc.py`.
+Five of the six intervals cover the analytical value; the 256,000-path run
+misses by 0.0001 (z ≈ 2.0), about as often as a 95% interval should. The
+estimator always uses antithetic paths and treats each antithetic pair as one
+independent sample, for both the control coefficient and the standard error.
+Adding the discounted-terminal-spot control variate reduces variance by
+**10.6×–25.9×** relative to antithetic sampling alone, and the two together by
+**23×–74×** relative to plain Monte Carlo with the same number of paths, across
+the three fixed test cases in `tests/test_mc.py`. A test checks that the
+reported standard error matches the spread of prices across 400 seeds.
+
+An earlier version computed both from individual paths, as if antithetic
+partners were independent. That overstated the control variate's benefit
+(the reported 4.55×–11.09× was really 0.49×–2.10×) and misstated the
+standard error.
 
 ![mc convergence](mc_convergence.png)
 

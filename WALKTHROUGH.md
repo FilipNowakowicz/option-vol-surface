@@ -140,7 +140,7 @@ legs in one pass.
 
 ### `src/mc.py` — Monte Carlo cross-check
 
-`mc.price_european` (`mc.py:47`) does three things stacked:
+`mc.price_european` (`mc.py:52`) does three things stacked:
 
 1. **GBM closed-form one-step simulation.** `S_T = S₀·exp((r−q−σ²/2)T +
    σ√T·Z)`, `Z ∼ N(0,1)`. No path discretisation needed for European
@@ -151,14 +151,16 @@ legs in one pass.
 3. **Control variate.** The discounted terminal underlying `Y = e^{−rT}
    S_T` has known mean `E[Y] = S₀·e^{−qT}`. We compute
    `X' = X − ĉ·(Y − E[Y])` where `ĉ = Cov(X,Y)/Var(Y)`, both estimated
-   in-sample (`mc.py:69-74`). On ATM calls this knocks another ~3× off
-   the stderr.
+   in-sample on the antithetic pair means (`_pair_means`). On the three
+   test cases this cuts variance a further 10.6×–25.9×.
 
-Stderr is the in-sample standard deviation of the adjusted payoffs
-divided by `√N`. **This is what the test asserts**: MC mean should fall
+Each path and its antithetic partner are dependent, so the independent
+samples are the `N/2` pair means. Stderr is their in-sample standard
+deviation divided by `√(N/2)`; `test_stderr_matches_spread_across_seeds`
+checks it against the spread of prices across 400 seeds. **This is what the test asserts**: MC mean should fall
 within ~3 standard errors of the analytical price.
 
-The Asian-option function `price_asian` (`mc.py:88`) is a stretch path —
+The Asian-option function `price_asian` (`mc.py:97`) is a stretch path —
 it has no closed-form benchmark, so the stderr is the entire credibility
 statement.
 
@@ -335,9 +337,12 @@ guarantees convergence.
 ### Why antithetic + control variate, not pure-MC + more paths?
 
 The implementation always uses antithetic paths. In the three fixed test
-cases, adding the control variate reduces variance by 4.55×–11.09× relative
-to antithetic sampling alone, implying the same precision with roughly
-one-quarter to one-eleventh as many paths in those cases. The control
+cases, adding the control variate reduces variance by 10.6×–25.9× relative
+to antithetic sampling alone, and the two together by 23×–74× relative to
+plain Monte Carlo, so the same precision needs a small fraction of the
+paths. The coefficient must be estimated on antithetic pair means: an
+earlier per-path version made the control variate look 4.55×–11.09× better
+than antithetic sampling when it was really 0.49×–2.10×. The control
 variate has negligible extra runtime cost (`S_T` is already computed for
 the payoff), while antithetic sampling reuses each normal draw with its
 negative. Both are standard variance-reduction techniques.
@@ -423,7 +428,7 @@ You will be asked about these — internalise them.
 
 - "What's the BS formula here?" → `bs.py:_d1_d2`, `bs.price`.
 - "How is theta defined?" → `bs.py:78` plus the section header at the top.
-- "How does the MC variance reduction actually work?" → `mc.py:69-74`.
+- "How does the MC variance reduction actually work?" → `mc.py:76-84`.
 - "What's the IV solver's fallback strategy?" → `iv.py:79-105`.
 - "How are bad quotes filtered?" → `data.py:128` (`clean_chain`).
 - "How is ATM IV defined when no exact ATM strike exists?" →
