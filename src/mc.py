@@ -36,6 +36,11 @@ def _terminal_prices(S, T, r, q, sigma, n_pairs, rng):
     return np.concatenate([up, dn])
 
 
+def _pair_means(values, n_pairs):
+    """Average each path with its antithetic partner (first half vs second half)."""
+    return 0.5 * (values[:n_pairs] + values[n_pairs:])
+
+
 def _payoff(ST, K, option: OptionType):
     if option == "call":
         return np.maximum(ST - K, 0.0)
@@ -67,13 +72,17 @@ def price_european(
 
     ST = _terminal_prices(S, T, r, q, sigma, n_pairs, rng)
     disc = np.exp(-r * T)
-    X = disc * _payoff(ST, K, option)  # discounted payoff per path
+    # Antithetic paths are dependent in pairs, so the independent samples are
+    # the pair means. Estimating the control coefficient or the standard
+    # error from individual paths would treat 2n correlated draws as 2n
+    # independent ones and misstate both.
+    X = _pair_means(disc * _payoff(ST, K, option), n_pairs)
 
     if control_variate:
         # Y = disc * ST; E[Y] = S exp(-qT)
-        Y = disc * ST
+        Y = _pair_means(disc * ST, n_pairs)
         EY = S * np.exp(-q * T)
-        # Estimate optimal c from sample: c_hat = Cov(X, Y) / Var(Y)
+        # Optimal c on the pair means: c_hat = Cov(X, Y) / Var(Y)
         cov = np.cov(X, Y, ddof=1)
         c_hat = cov[0, 1] / cov[1, 1]
         X_adj = X - c_hat * (Y - EY)
@@ -81,8 +90,8 @@ def price_european(
         X_adj = X
 
     mean = float(np.mean(X_adj))
-    se = float(np.std(X_adj, ddof=1) / np.sqrt(len(X_adj)))
-    return MCResult(price=mean, stderr=se, n_paths=len(X_adj))
+    se = float(np.std(X_adj, ddof=1) / np.sqrt(n_pairs))
+    return MCResult(price=mean, stderr=se, n_paths=2 * n_pairs)
 
 
 def price_asian(
@@ -123,7 +132,7 @@ def price_asian(
 
     avg = paths.mean(axis=1)
     disc = np.exp(-r * T)
-    X = disc * _payoff(avg, K, option)
+    X = _pair_means(disc * _payoff(avg, K, option), n_pairs)
     mean = float(np.mean(X))
-    se = float(np.std(X, ddof=1) / np.sqrt(len(X)))
-    return MCResult(price=mean, stderr=se, n_paths=len(X))
+    se = float(np.std(X, ddof=1) / np.sqrt(n_pairs))
+    return MCResult(price=mean, stderr=se, n_paths=2 * n_pairs)

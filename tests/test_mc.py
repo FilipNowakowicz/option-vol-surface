@@ -44,3 +44,16 @@ def test_control_variate_reduces_variance(case):
     assert with_cv.stderr < no_cv.stderr, (
         f"CV stderr {with_cv.stderr:.5f} >= no-CV stderr {no_cv.stderr:.5f}"
     )
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_stderr_matches_spread_across_seeds(case):
+    """The reported stderr must match how much the price actually varies
+    between independent runs. Treating antithetic paths as independent
+    would break this."""
+    import numpy as np
+
+    runs = [mc.price_european(**case, n_paths=2_000, seed=s) for s in range(400)]
+    empirical = np.std([r.price for r in runs], ddof=1)
+    reported = np.mean([r.stderr for r in runs])
+    assert 0.85 < reported / empirical < 1.15, (reported, empirical)
