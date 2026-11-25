@@ -192,7 +192,8 @@ def main(refresh: bool = False):
     print(diag.skew.head(10).to_string(index=False, float_format=lambda x: f"{x:.4f}"))
 
     header("Phase 4b — SVI interpolation validation")
-    svi = calibrate_surface(surf, spot=spot, r=R, q=q_yfin)
+    # Primary refit from docs/SVI_REFIT_PLAN.md (variant C).
+    svi = calibrate_surface(surf, spot=spot, r=R, q=q_yfin, objective="iv", grid_starts=True)
     svi.to_csv(output_dir / "svi_validation.csv", index=False)
     svi_diag = surface_arbitrage_diagnostics(svi)
     print(f"  calibrated expiries {len(svi)}")
