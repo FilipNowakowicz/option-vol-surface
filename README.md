@@ -112,22 +112,41 @@ forward, call at/above forward). Every fifth *interior* strike is a deterministi
 holdout, leaving the endpoints in training. This is a within-snapshot
 interpolation check, not a forecast or trading backtest.
 
-On the frozen SPY snapshot, the pipeline returns fitted parameters and
-holdout diagnostics for all **27** usable expiries; **22 of 27** optimiser
-runs report successful convergence. Across all returned slices, the
-equal-weighted mean held-out IV RMSE is **0.265 vol points** and held-out
-price RMSE is **$0.377**. A piecewise-linear total-variance interpolation on
-the exact same split achieves **0.122 vol points** IV RMSE, so this small,
-unweighted SVI specification does **not** beat that local interpolation
-baseline on this snapshot. That comparison is intentionally reported rather
-than selecting a parameterisation because it looks better.
+The first version fitted squared errors in total variance, from two starts,
+while scoring implied-vol error. A refit, planned and committed before it was
+run ([`docs/SVI_REFIT_PLAN.md`](docs/SVI_REFIT_PLAN.md)), tested three changes:
+residuals in implied-vol space (B), a fixed grid of 18 starts (C, the primary
+variant) and a Gatheral–Jacquier butterfly penalty (D).
 
-The fit parameterisation enforces positive total variance. It does **not**
-enforce the full SVI butterfly conditions or cross-expiry calendar consistency.
-A dense observed-domain price-convexity scan has 0 butterfly flags, while a
-common-k grid finds **366** adjacent-expiry calendar flags. These are
-diagnostics of independently fitted slices, not a claim that the surface is
-arbitrage-free. Reproduce the exact per-expiry metrics with:
+| Variant | Mean held-out IV RMSE | Slices beating linear | Converged |
+| --- | ---: | ---: | ---: |
+| A: original | 0.265 vol pts | 3 / 27 | 22 / 27 |
+| B: IV-space residuals | 0.249 | 3 / 27 | 26 / 27 |
+| C: B + 18 starts (primary, now the default) | 0.249 | 3 / 27 | 26 / 27 |
+| D: C + butterfly penalty | 0.249 | 3 / 27 | 26 / 27 |
+| Linear interpolation in total variance | **0.122** | – | – |
+
+Fitting in vol space helps and fixes most convergence failures. More starts and
+the penalty change nothing, so the remaining gap is the shape of raw SVI, not
+the optimiser. A sparse-quote test (every third training strike) gives the
+same ordering: 0.256 against 0.142. **By the pre-registered rule, SVI does not
+beat interpolation on either test.**
+
+A descriptive follow-up (`scripts/svi_spread_check.py`, not pre-registered)
+compares the errors with the quotes' own noise. The median bid–ask half-spread
+is 0.031 vol points. Linear interpolation lands **75%** of held-out quotes
+inside the spread, SVI **20%**. SVI is better only on the three shortest
+expiries, where the smile curves most sharply; on longer expiries it misses by
+several half-spreads. On a liquid chain with dense strikes, interpolation is
+already about as accurate as the quotes allow, and five SVI parameters cannot
+follow SPY's long-dated smile that closely.
+
+With variant C, held-out price RMSE is **$0.340**. The fit enforces positive
+total variance but not the full butterfly conditions or cross-expiry calendar
+consistency. A dense observed-domain price-convexity scan has 0 butterfly
+flags, while a common-k grid finds **266** adjacent-expiry calendar flags (366
+with the original fit). These are diagnostics of independently fitted slices,
+not a claim that the surface is arbitrage-free. Reproduce with:
 
 ```bash
 uv run python run.py

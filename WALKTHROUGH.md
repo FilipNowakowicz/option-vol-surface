@@ -242,8 +242,11 @@ interior strike. That makes the train/holdout division deterministic and
 prevents an interpolation benchmark from extrapolating beyond its training
 domain.
 
-The optimiser uses two deterministic starts and bounds `b > 0`,
-`|rho| < 1`, `sigma > 0`. Rather than freely fitting `a`, it fits the minimum
+`run.py` uses the refit chosen in `docs/SVI_REFIT_PLAN.md`: residuals in
+implied-vol space and a fixed grid of 18 deterministic starts (the original
+two-start total-variance fit is still the `_fit_slice` default). Bounds are
+`b > 0`, `|rho| < 1`, `sigma > 0`. An optional penalty on the
+Gatheral–Jacquier function `g(k) < 0` exists but changed nothing here. Rather than freely fitting `a`, it fits the minimum
 total variance and derives `a`; this guarantees `w(k) > 0` for all k. The
 CSV records train and holdout IV RMSE, holdout price RMSE (puts converted to
 calls by put-call parity), and a piecewise-linear total-variance benchmark.
@@ -408,9 +411,6 @@ You will be asked about these — internalise them.
 
 ## 7. How to extend
 
-- **Fit SVI to one expiry.** Adds a parametric smile model with a
-  no-arbitrage check (calendar + butterfly). Drop-in for
-  `surface._skew_per_expiry` consumers. Half-day of work.
 - **Add Heston MC.** Path-discretised stochastic vol, calibrated to the
   empirical surface by a least-squares fit on a slice. Tests the variance
   reduction more aggressively.
