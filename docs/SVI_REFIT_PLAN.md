@@ -42,3 +42,11 @@ No other variants are tried on this snapshot.
 - All four variants and both tests are reported, whatever the outcome.
 - If C does not beat interpolation on test 1, the README says so, as it
   does now.
+
+## Amendment before running
+
+- Variant D's penalty weight is fixed at 1.0 (residuals in vol units,
+  `g` evaluated at 41 points on the training `k` range).
+- Test 1 keeps the slice set the baseline uses (27 expiries). Test 2 drops
+  any slice with fewer than 5 training strikes after thinning; the count is
+  reported.
